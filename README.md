@@ -1,13 +1,13 @@
 # Paseo Usage
 
-A standalone Usage plugin for **Paseo 0.12.0**, inspired by [T3 Code](https://github.com/pingdotgg/t3code). Track Codex, Claude Code, Grok Build, OpenCode, Antigravity, Pi, and Cursor usage with costs, tokens, smooth charts, model breakdowns, and subscription limits.
+A standalone Usage plugin for **Paseo 0.12.0**, porting and adapting [T3 Code](https://github.com/pingdotgg/t3code)'s usage interface and history/pricing readers. Track Codex, Claude Code, Grok Build, OpenCode, Antigravity, Pi, and Cursor usage with costs, tokens, smooth charts, model breakdowns, and subscription limits.
 
-The plugin works without T3 Code installed. Historical usage comes directly from each provider: local session logs or conversation databases on the selected Paseo host, and Cursor’s account usage API. It never reads T3 Code caches, databases, settings, or usage data.
+Historical usage comes directly from each provider: local session logs or conversation databases on the selected Paseo host, and Cursor’s account usage API.
 
 ## Features
 
 - **Cost / Tokens / Limits** views and **Past 24h / 7 days / 30 days / 90 days** periods.
-- History from all seven T3 Code usage providers, including sessions outside Paseo, Codex archives, Claude subagent logs, Pi forks and tool/summary costs, OpenCode legacy JSON and SQLite, and Antigravity generation/step metadata.
+- History from sessions outside Paseo, including Codex archives, Claude subagent logs, Pi forks and tool/summary costs, OpenCode legacy JSON and SQLite, and Antigravity generation/step metadata.
 - Cursor account-wide usage via its saved CLI login, with pagination, account deduplication, a five-minute in-memory cache, and explicit refresh. No transcript-based token guesses.
 - Smooth hourly and daily area charts, provider filtering, model rankings, and detailed token breakdowns.
 - Cached, uncached, cache-write, output, and reasoning counts, cache savings, and recorded speed.
@@ -60,7 +60,7 @@ Paseo builds the plugin from `index.client.tsx` and `index.server.ts`. Client co
 
 ## Data and coverage
 
-History readers support these sources without T3 Code installed:
+History readers use these provider-owned sources:
 
 | Provider    | Default source and environment overrides                                                                                                                                             |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -72,7 +72,7 @@ History readers support these sources without T3 Code installed:
 | Antigravity | Comma-separated `ANTIGRAVITY_DATA_DIR`, otherwise `~/.gemini/{antigravity,antigravity-cli,antigravity-ide,antigravity-backup}` and `~/.config/antigravity`; conversation `.db` files |
 | Cursor      | Dashboard account API using CLI `auth.json`: `~/.config/cursor` on Linux (respects `XDG_CONFIG_HOME`), `%APPDATA%/Cursor` on Windows, or `~/.cursor` on macOS with file storage      |
 
-Add more directories or Cursor CLI login files in **History sources**, one absolute or `~/` path per line. Pi custom session directories are supported. Antigravity directories can point to a `conversations` directory or its parent. T3-managed directories are not discovered or read.
+Add more directories or Cursor CLI login files in **History sources**, one absolute or `~/` path per line. Pi custom session directories are supported. Antigravity directories can point to a `conversations` directory or its parent.
 
 Cursor history includes usage across machines for that account. Duplicate logins count once. API-key or in-memory Cursor authentication cannot supply dashboard history; a saved CLI login is needed. On macOS, **Allow Cursor Keychain access** is off by default. Enabling it reads the `cursor-access-token` / `cursor-user` Keychain entry and may prompt on the host Mac. Access is bounded by a timeout. Credentials remain on the host and are sent only to the fixed `https://cursor.com` endpoint, with redirects rejected. They are never returned over the plugin RPC or saved in plugin preferences.
 
@@ -80,8 +80,8 @@ SQLite readers require the host's built-in `node:sqlite`; unavailable SQLite sup
 
 Missing or deleted history cannot be reconstructed. The file cache stays in memory, and history removed from disk stops contributing to totals. The page shows the exact date range and time zone; incomplete or invalid records are handled silently. These boundaries can produce different totals from another application's retained history.
 
-The plugin does not merge multiple Paseo hosts. Unlike T3 Code, it does not discover T3-configured provider instances, T3-managed profiles, or T3 caches. Add the original provider locations explicitly when needed. Subscription limits are restricted to information exposed by Paseo 0.12.0's public API. Empty history, unknown model prices, and unavailable limits remain explicit states.
+Usage covers one selected Paseo host. Add custom provider locations explicitly when needed. Subscription limits are restricted to information exposed by Paseo 0.12.0's public API. Empty history, unknown model prices, and unavailable limits remain explicit states.
 
 ## License and attribution
 
-[MIT](LICENSE). The page structure and history/pricing readers are adapted from T3 Code, and downloaded model prices come from LiteLLM. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for upstream revisions and license notices.
+[MIT](LICENSE). Downloaded model prices come from LiteLLM. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for upstream revisions and license notices.
