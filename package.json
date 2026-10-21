@@ -1,0 +1,47 @@
+{
+  "name": "paseo-usage",
+  "version": "0.1.0",
+  "private": true,
+  "description": "T3 Code-inspired usage analytics for Paseo",
+  "license": "MIT",
+  "files": [
+    "paseo-plugin.json",
+    "index.client.tsx",
+    "index.server.ts",
+    "client/",
+    "server/",
+    "shared/",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "scripts": {
+    "preview:usage": "vp dev --config preview/vite.config.ts",
+    "check": "vp check",
+    "lint": "vp lint",
+    "fmt": "vp fmt",
+    "typecheck": "vp check --no-fmt --no-lint",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "fast-png": "^8.0.0"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.12.0",
+    "@tanstack/react-query": "^5.90.11",
+    "@types/node": "^22.20.5",
+    "@types/react": "~19.2.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/react-test-renderer": "^19.3.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-web": "^0.21.4",
+    "react-test-renderer": "19.1.0",
+    "typescript": "^5.9.3",
+    "vite-plus": "catalog:",
+    "zod": "^4.4.3"
+  },
+  "packageManager": "pnpm@12.14.0"
+}
