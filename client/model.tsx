@@ -3,13 +3,24 @@ import { Modal } from "@getpaseo/plugin/client/react-native";
 import type { ModelUsage } from "../shared/usage";
 import { UsageChart } from "./chart";
 import { Mix } from "./breakdown";
-import { Button, count, Label, money, percent, ProviderMark, styles, useColors } from "./ui";
+import {
+  Button,
+  count,
+  costLabel,
+  Label,
+  money,
+  percent,
+  ProviderMark,
+  styles,
+  useColors,
+} from "./ui";
 
 export function ModelDetail({
   model,
   keys,
   metric,
   hourly,
+  until,
   onClose,
   onPrice,
 }: {
@@ -17,6 +28,7 @@ export function ModelDetail({
   keys: string[];
   metric: "cost" | "tokens";
   hourly: boolean;
+  until: string;
   onClose: () => void;
   onPrice: () => void;
 }) {
@@ -41,7 +53,7 @@ export function ModelDetail({
         </View>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 28 }}>
           {[
-            ["API estimate", model.unpriced && !model.cost ? "Unpriced" : money(model.cost)],
+            ["API estimate", costLabel(model)],
             ["Processed tokens", count(model.tokens)],
             [
               "Cache hit rate",
@@ -53,7 +65,9 @@ export function ModelDetail({
             ],
             [
               "Cost / million tokens",
-              model.tokens ? money((model.cost / model.tokens) * 1e6) : "—",
+              model.tokens
+                ? costLabel({ cost: (model.cost / model.tokens) * 1e6, unpriced: model.unpriced })
+                : "—",
             ],
           ].map(([label, value]) => (
             <View key={label} style={{ gap: 4 }}>
@@ -70,6 +84,7 @@ export function ModelDetail({
           providers={[model.provider]}
           metric={metric}
           hourly={hourly}
+          until={until}
           height={180}
         />
         <Mix totals={model} metric={metric} />

@@ -247,7 +247,8 @@ export class CursorReader {
       if (seenAccounts.has(cached.result.accountKey)) return;
       seenAccounts.add(cached.result.accountKey);
       source.files++;
-      records.push(...cached.result.records.filter((record) => record.timestampMs >= sinceMs));
+      for (const record of cached.result.records)
+        if (record.timestampMs >= sinceMs) records.push(record);
     };
     const defaultFile =
       process.platform !== "darwin" || process.env.AGENT_CLI_CREDENTIAL_STORE === "file";

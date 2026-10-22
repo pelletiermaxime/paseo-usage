@@ -1,18 +1,28 @@
 import { useMemo, useState } from "react";
 import { Image, PixelRatio, Pressable, processColor, View } from "react-native";
 import type { UsageSummary } from "../shared/usage";
-import { count, Label, money, providerColor, providerLabel, styles, useColors } from "./ui";
+import {
+  count,
+  costLabel,
+  Label,
+  money,
+  providerColor,
+  providerLabel,
+  styles,
+  useColors,
+} from "./ui";
 
 type Bucket = UsageSummary["buckets"][number];
 import { chartScale, pngDataUri, renderChartPng, type ChartSeries } from "./chart-image";
 
-type Column = { key: string; values: number[]; total: number };
+type Column = { key: string; values: number[]; unpriced: number[]; total: number };
 export function UsageChart({
   buckets,
   keys,
   providers,
   metric,
   hourly,
+  until,
   height = 210,
 }: {
   buckets: Bucket[];
@@ -20,17 +30,31 @@ export function UsageChart({
   providers: string[];
   metric: "cost" | "tokens";
   hourly: boolean;
+  until: string;
   height?: number;
 }) {
   const c = useColors();
   const [width, setWidth] = useState(640);
   const [hover, setHover] = useState<number | null>(null);
   const format = metric === "cost" ? money : count;
+  const formatValue = (value: number, unpriced: number) =>
+    metric === "cost" ? costLabel({ cost: value, unpriced }) : count(value);
+  const columnLabel = (column: Column) =>
+    formatValue(
+      column.total,
+      column.unpriced.reduce((sum, n) => sum + n, 0),
+    );
   const columns = useMemo<Column[]>(() => {
-    const lookup = new Map(buckets.map((b) => [b.key + ":" + b.provider, b[metric]]));
+    const lookup = new Map(buckets.map((b) => [b.key + ":" + b.provider, b]));
     return keys.map((key) => {
-      const values = providers.map((provider) => lookup.get(key + ":" + provider) ?? 0);
-      return { key, values, total: values.reduce((a, b) => a + b, 0) };
+      const rows = providers.map((provider) => lookup.get(key + ":" + provider));
+      const values = rows.map((b) => b?.[metric] ?? 0);
+      return {
+        key,
+        values,
+        unpriced: rows.map((b) => b?.unpriced ?? 0),
+        total: values.reduce((a, b) => a + b, 0),
+      };
     });
   }, [buckets, keys, providers, metric]);
   const series = useMemo<ChartSeries[]>(
@@ -55,11 +79,15 @@ export function UsageChart({
     [plotWidth, plotHeight, series, max],
   );
   const selected = hover === null ? undefined : columns[hover];
-  const dateLabel = (key: string) =>
-    new Date(key.length === 10 ? key + "T12:00:00Z" : key).toLocaleString(
-      undefined,
-      hourly ? { hour: "numeric" } : { month: "short", day: "numeric", timeZone: "UTC" },
+  const dateLabel = (key: string) => {
+    // Keep bucket keys for totals, but label the right edge with the snapshot's actual end.
+    const date = new Date(
+      hourly && key === keys.at(-1) ? until : key.length === 10 ? key + "T12:00:00Z" : key,
     );
+    return hourly
+      ? `${String(date.getHours()).padStart(2, "0")}h${String(date.getMinutes()).padStart(2, "0")}`
+      : date.toLocaleString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+  };
   return (
     <View style={{ gap: 8 }} onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
       <View
@@ -98,7 +126,7 @@ export function UsageChart({
           <Pressable
             key={column.key}
             accessibilityRole="button"
-            accessibilityLabel={dateLabel(column.key) + ": " + format(column.total)}
+            accessibilityLabel={dateLabel(column.key) + ": " + columnLabel(column)}
             onHoverIn={() => setHover(i)}
             onHoverOut={() => setHover(null)}
             onPress={() => setHover(hover === i ? null : i)}
@@ -162,7 +190,7 @@ export function UsageChart({
       >
         {selected ? (
           <Label muted style={{ fontSize: 11 }}>
-            {dateLabel(selected.key)} · {format(selected.total)}
+            {dateLabel(selected.key)} · {columnLabel(selected)}
           </Label>
         ) : null}
         {providers.map((p, i) => (
@@ -177,7 +205,7 @@ export function UsageChart({
             />
             <Label muted style={{ fontSize: 11 }}>
               {providerLabel(p)}
-              {selected ? " " + format(selected.values[i]) : ""}
+              {selected ? " " + formatValue(selected.values[i], selected.unpriced[i]) : ""}
             </Label>
           </View>
         ))}

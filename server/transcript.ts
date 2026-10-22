@@ -108,7 +108,7 @@ export async function readTranscript(
           let start = 0;
           for (let end = buffer.indexOf(10, start); end !== -1; end = buffer.indexOf(10, start)) {
             const parsed = parse(buffer.subarray(start, end).toString("utf8"), state, piState);
-            records.push(...parsed.records);
+            for (const record of parsed.records) records.push(record);
             exceptions += parsed.exceptions;
             position += end - start + 1;
             start = end + 1;

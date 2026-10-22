@@ -2,5 +2,6 @@
   "id": "usage",
   "name": "Usage",
   "description": "Costs, tokens, model breakdowns, and subscription limits inspired by T3 Code.",
-  "requirements": { "paseo": "0.12.0" }
+  "requirements": { "paseo": "0.12.0" },
+  "build": [["vp", "install", "--prod", "--frozen-lockfile", "--ignore-scripts"]]
 }

@@ -21,6 +21,14 @@ API cost estimates represent equivalent token costs, rather than subscription ch
 
 Use Node from `.node-version` and [VitePlus](https://viteplus.dev). This project pins pnpm through its `packageManager` field and has its own dependency lockfile.
 
+With `vp` available in the daemon's PATH, install directly from GitHub:
+
+```sh
+paseo plugin install https://github.com/pelletiermaxime/paseo-usage --id usage
+```
+
+The plugin's build step runs `vp install --prod --frozen-lockfile --ignore-scripts` before Paseo compiles it, including on a fresh checkout. This installs runtime dependencies without running dependency lifecycle scripts.
+
 From this project's directory:
 
 ```sh
@@ -81,6 +89,8 @@ SQLite readers require the host's built-in `node:sqlite`; unavailable SQLite sup
 Missing or deleted history cannot be reconstructed. The file cache stays in memory, and history removed from disk stops contributing to totals. The page shows the exact date range and time zone; incomplete or invalid records are handled silently. These boundaries can produce different totals from another application's retained history.
 
 Usage covers one selected Paseo host. Add custom provider locations explicitly when needed. Subscription limits are restricted to information exposed by Paseo 0.12.0's public API. Empty history, unknown model prices, and unavailable limits remain explicit states.
+
+**Check limits** rereads the daemon's available values. Paseo may cache provider readings for up to five minutes; its public plugin API cannot force a provider update. The limits view shows the last successful host check separately from provider update timestamps, when available.
 
 ## License and attribution
 

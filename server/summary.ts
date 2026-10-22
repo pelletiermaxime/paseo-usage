@@ -61,7 +61,10 @@ export function summarize(
   const sessions = new Set<string>();
   const providerSessions = new Map<string, Set<string>>();
   const modelSessions = new Map<string, Set<string>>();
-  const models = new Map<string, { totals: Totals; model: string; provider: string }>();
+  const models = new Map<
+    string,
+    { totals: Totals; model: string; provider: string; rateModel: string | null }
+  >();
   const buckets = new Map<string, Totals & { key: string; provider: string }>();
   const modelBuckets = new Map<string, Map<string, Totals & { key: string; provider: string }>>();
   let unresolvedSpeed = 0;
@@ -70,7 +73,8 @@ export function summarize(
     const day = dayKey(new Date(original.timestampMs));
     if (input.days === 1 ? original.timestampMs < Date.parse(since) : day < firstDay) continue;
     const mapped = settings.modelMappings[original.model]?.trim();
-    const record = mapped ? { ...original, model: mapped } : original;
+    const record = mapped ? { ...original, model: mapped, rateModel: mapped } : original;
+    const rateModel = record.rateModel ?? record.model;
     const modelKey = record.provider + ":" + record.model;
     const hour = new Date(record.timestampMs);
     hour.setUTCMinutes(0, 0, 0);
@@ -109,8 +113,12 @@ export function summarize(
       models.set(modelKey, {
         model: record.model,
         provider: record.provider,
+        rateModel,
         totals: emptyTotals(),
       });
+    // A display model may combine different provider rate identities. In that
+    // case there is no single catalog price to show in the model detail.
+    if (models.get(modelKey)!.rateModel !== rateModel) models.get(modelKey)!.rateModel = null;
     accumulate(models.get(modelKey)!.totals);
     if (!buckets.has(bucketId))
       buckets.set(bucketId, { ...emptyTotals(), key, provider: record.provider });
@@ -152,7 +160,7 @@ export function summarize(
     models: [...models]
       .map(([key, entry]) => {
         const override = settings.prices[entry.model];
-        const rate = lookupRate(rates, entry.model);
+        const rate = entry.rateModel === null ? null : lookupRate(rates, entry.rateModel);
         return {
           ...entry.totals,
           model: entry.model,

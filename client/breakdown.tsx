@@ -3,6 +3,7 @@ import { Pressable, View, type TextStyle } from "react-native";
 import type { ModelUsage, Totals, UsageSummary } from "../shared/usage";
 import {
   count,
+  costLabel,
   Label,
   money,
   percent,
@@ -195,9 +196,7 @@ export function Breakdown({
                     </View>
                   )}
                 </View>
-                <Label style={cell}>
-                  {model.unpriced > 0 && model.cost === 0 ? "Unpriced" : money(model.cost)}
-                </Label>
+                <Label style={cell}>{costLabel(model)}</Label>
                 {!compact && (
                   <Label muted style={cell}>
                     {percent(
@@ -213,6 +212,7 @@ export function Breakdown({
           : periods.map((key) => {
               const rows = summary.buckets.filter((b) => b.key === key);
               const cost = rows.reduce((sum, b) => sum + b.cost, 0),
+                unpriced = rows.reduce((sum, b) => sum + b.unpriced, 0),
                 tokens = rows.reduce((sum, b) => sum + b.tokens, 0);
               const value = metric === "cost" ? cost : tokens;
               return (
@@ -233,13 +233,13 @@ export function Breakdown({
                             (b) =>
                               providerLabel(b.provider) +
                               " " +
-                              (metric === "cost" ? money(b.cost) : count(b.tokens)),
+                              (metric === "cost" ? costLabel(b) : count(b.tokens)),
                           )
                           .join(" · ")}
                       </Label>
                     )}
                   </View>
-                  <Label style={cell}>{money(cost)}</Label>
+                  <Label style={cell}>{costLabel({ cost, unpriced })}</Label>
                   {!compact && (
                     <Label muted style={cell}>
                       {percent(summary.totals[metric] ? value / summary.totals[metric] : 0)}

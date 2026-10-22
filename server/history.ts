@@ -181,7 +181,7 @@ export class HistoryReader {
         };
       }
       sources.push(scanned.source);
-      records.push(...scanned.records);
+      for (const record of scanned.records) records.push(record);
     };
     const opencodeEnv = environmentPaths("OPENCODE_DATA_DIR");
     const xdgData = process.env.XDG_DATA_HOME;

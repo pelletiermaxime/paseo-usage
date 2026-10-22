@@ -147,6 +147,8 @@ export const count = (n: number) =>
       : n >= 1e3
         ? (n / 1e3).toFixed(1) + "K"
         : n.toLocaleString("en-US");
+export const costLabel = ({ cost, unpriced }: { cost: number; unpriced: number }) =>
+  unpriced > 0 ? (cost === 0 ? "Unpriced" : money(cost) + " · partial") : money(cost);
 export const percent = (n: number) => (n * 100).toFixed(1) + "%";
 export const providerLabel = (id: string) =>
   ({
@@ -157,6 +159,7 @@ export const providerLabel = (id: string) =>
     grok: "Grok Build",
     pi: "Pi",
     antigravity: "Antigravity",
+    copilot: "GitHub Copilot",
   })[id] ?? id;
 export const providerColor = (id: string, foreground: string) =>
   ({

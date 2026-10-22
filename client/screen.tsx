@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { PluginSurfaceProps, SettingsState } from "@getpaseo/plugin/client";
 import { useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Modal } from "@getpaseo/plugin/client/react-native";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ScrollView, View } from "react-native";
 import {
   summaryRpc,
@@ -21,6 +21,7 @@ import { PriceEditor, SourceEditor } from "./settings";
 import {
   Button,
   count,
+  costLabel,
   Label,
   money,
   percent,
@@ -81,7 +82,8 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
   const [editor, setEditor] = useState<"prices" | "sources" | null>(null);
   const [model, setModel] = useState<ModelUsage | null>(null);
   const [priceModel, setPriceModel] = useState<string | undefined>();
-  const [limitsRefresh, setLimitsRefresh] = useState(0);
+  const [limitProviders, setLimitProviders] = useState<string[]>([]);
+  const limitsFetching = useIsFetching({ queryKey: ["usage-limits", host.id] }) > 0;
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const historyKey = [
     "usage-summary",
@@ -113,7 +115,7 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
   async function refresh() {
     if (refreshing) return;
     if (metric === "limits") {
-      setLimitsRefresh((n) => n + 1);
+      await queryClient.invalidateQueries({ queryKey: ["usage-limits", host.id] });
       return;
     }
     setRefreshing(true);
@@ -214,7 +216,12 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
       ].join(" – ")
     : null;
   const knownProviders = [
-    ...new Set([...historyProviders, ...(summary?.providers.map((p) => p.provider) ?? [])]),
+    ...new Set([
+      ...historyProviders,
+      ...limitProviders,
+      ...values.hiddenProviders,
+      ...(summary?.providers.map((p) => p.provider) ?? []),
+    ]),
   ];
   const providerText =
     values.hiddenProviders.length === 0
@@ -273,8 +280,8 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
             )}
             <Button
               icon="RefreshCw"
-              label={metric === "limits" ? "Refresh limits" : "Refresh usage"}
-              disabled={refreshing || query.isFetching}
+              label={metric === "limits" ? "Check limits" : "Refresh usage"}
+              disabled={metric === "limits" ? limitsFetching : refreshing || query.isFetching}
               onPress={() => void refresh()}
             />
           </View>
@@ -306,7 +313,11 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
             <Label style={{ color: c.statusDanger }}>{settings.saveError}</Label>
           )}
           {metric === "limits" ? (
-            <Limits hostId={host.id} hidden={values.hiddenProviders} refreshKey={limitsRefresh} />
+            <Limits
+              hostId={host.id}
+              hidden={values.hiddenProviders}
+              onProviders={setLimitProviders}
+            />
           ) : (
             <>
               {refreshError && (
@@ -323,6 +334,15 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
               )}
               {summary && (
                 <View style={{ gap: 28, opacity: refreshing ? 0.5 : 1 }}>
+                  {summary.warnings.length > 0 && (
+                    <View style={{ gap: 6 }}>
+                      {summary.warnings.map((warning, index) => (
+                        <Label key={index} style={{ color: c.statusWarning }}>
+                          {warning}
+                        </Label>
+                      ))}
+                    </View>
+                  )}
                   <Overview
                     summary={summary}
                     metric={metric}
@@ -455,12 +475,13 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
           </Modal.Content>
         </Modal>
       )}
-      {model && (
+      {model && summary && (
         <ModelDetail
           model={model}
           keys={keys}
           metric={metric === "limits" ? "cost" : metric}
           hourly={days === 1}
+          until={summary.until}
           onClose={() => setModel(null)}
           onPrice={() => {
             openPrices(model.model);
@@ -515,7 +536,7 @@ function Overview({
               { fontSize: 36, lineHeight: 44, fontWeight: "600", letterSpacing: -1 },
             ]}
           >
-            {metric === "cost" ? money(summary.totals.cost) : count(summary.totals.tokens)}
+            {metric === "cost" ? costLabel(summary.totals) : count(summary.totals.tokens)}
           </Label>
           <Label muted style={{ fontSize: 11 }}>
             {summary.sessions.toLocaleString()} sessions{metric === "cost" ? " · API estimate" : ""}
@@ -540,13 +561,13 @@ function Overview({
                 </Label>
               </View>
               <Label style={[styles.number, { fontWeight: "500" }]}>
-                {metric === "cost" ? money(provider.cost) : count(provider.tokens)}
+                {metric === "cost" ? costLabel(provider) : count(provider.tokens)}
               </Label>
             </View>
             <Label muted style={{ fontSize: 11 }}>
               {percent(summary.totals[metric] ? provider[metric] / summary.totals[metric] : 0)} of{" "}
               {metric} ·{" "}
-              {metric === "cost" ? count(provider.tokens) + " tokens" : money(provider.cost)}
+              {metric === "cost" ? count(provider.tokens) + " tokens" : costLabel(provider)}
             </Label>
           </View>
         ))}
@@ -561,6 +582,7 @@ function Overview({
           providers={summary.providers.map((p) => p.provider)}
           metric={metric}
           hourly={hourly}
+          until={summary.until}
         />
       </View>
     </View>

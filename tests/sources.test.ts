@@ -410,6 +410,35 @@ test("Cursor dedupes account logins, caches briefly, forces refresh, and drops t
   expect(fetchApi).toHaveBeenCalledTimes(2);
 });
 
+test("a large Cursor account survives pagination, cached reads and the combined history scan", async () => {
+  const auth = join(root, "large-account.json");
+  await writeFile(auth, json({ accessToken: cursorToken() }));
+  const settings = usageSettings.schema.parse({ cursorAuthFiles: [auth] });
+  const total = 150_001;
+  const fetchApi = vi.fn<CursorFetch>().mockImplementation(async (_url, options) => {
+    const { page } = JSON.parse(options.body) as { page: number };
+    const start = (page - 1) * 1000;
+    return response({
+      totalUsageEventsCount: total,
+      usageEventsDisplay: Array.from({ length: Math.min(1000, total - start) }, (_, i) =>
+        cursorEvent(start + i),
+      ),
+    });
+  });
+  const reader = new HistoryReader(new CursorReader(fetchApi));
+  const first = await reader.read(settings);
+  expect(first.sources.find((s) => s.provider === "cursor")).toMatchObject({
+    status: "ready",
+    records: total,
+  });
+  expect(first.records).toHaveLength(total);
+  expect(new Set(first.records.map((r) => r.dedupeKey)).size).toBe(total);
+  expect(fetchApi).toHaveBeenCalledTimes(151);
+  const cached = await reader.read(settings);
+  expect(cached.records).toHaveLength(total);
+  expect(fetchApi).toHaveBeenCalledTimes(151);
+});
+
 test("Cursor failed refreshes discard stale success and are throttled until explicitly retried", async () => {
   const auth = join(root, "auth.json");
   await writeFile(auth, json({ accessToken: cursorToken() }));

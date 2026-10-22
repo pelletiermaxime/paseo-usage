@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import { summarize } from "../server/summary";
-import { createOverrideRateTable, priceUsage } from "../server/pricing";
+import { createOverrideRateTable, parseRateTable, priceUsage } from "../server/pricing";
 import type { UsageRecord } from "../server/types";
 import { summaryRpc, usageSettings } from "../shared/usage";
 
@@ -91,6 +91,44 @@ test("provider-reported cost is counted as Other without rates and overrides tak
   expect(priceUsage(table, r).categoryCostUsd).toBeNull();
   const override = createOverrideRateTable(settings.prices);
   expect(priceUsage(table, r, override).costUsd).toBeCloseTo(0.0025);
+});
+
+test("model mappings replace provider rate identities for estimates, savings and displayed prices", () => {
+  const rates = parseRateTable({
+    old: { input_cost_per_token: 1e-6, output_cost_per_token: 2e-6 },
+    target: {
+      input_cost_per_token: 10e-6,
+      output_cost_per_token: 20e-6,
+      cache_read_input_token_cost: 1e-6,
+    },
+  });
+  const row = record({ provider: "pi", model: "provider/old", rateModel: "old" });
+  const defaults = usageSettings.schema.parse({});
+  const original = summarize([row], [], defaults, input, now, rates);
+  expect(original.models[0].price?.inputCostPerMillionTokens).toBe(1);
+  const mapped = summarize(
+    [row],
+    [],
+    { ...defaults, modelMappings: { "provider/old": "target" } },
+    input,
+    now,
+    rates,
+  );
+  expect(mapped.models[0].model).toBe("target");
+  expect(mapped.models[0].price?.inputCostPerMillionTokens).toBe(10);
+  expect(mapped.totals.cost).toBeCloseTo(0.0025);
+  expect(mapped.totals.savings).toBeCloseTo(0.0018);
+  const reported = summarize(
+    [{ ...row, reportedCostUsd: 7 }],
+    [],
+    { ...defaults, modelMappings: { "provider/old": "target" } },
+    input,
+    now,
+    rates,
+  );
+  expect(reported.totals.cost).toBe(7);
+  const mixed = summarize([row, { ...row, rateModel: "target" }], [], defaults, input, now, rates);
+  expect(mixed.models[0].price).toBeNull();
 });
 
 test("without downloaded prices token usage stays visible and automatic costs are marked unpriced", () => {
