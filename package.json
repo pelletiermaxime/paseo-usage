@@ -11,6 +11,8 @@
     "client/",
     "server/",
     "shared/",
+    "OVERVIEW.md",
+    "assets/",
     "README.md",
     "THIRD_PARTY_NOTICES.md",
     "LICENSE"

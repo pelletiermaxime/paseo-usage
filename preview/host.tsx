@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
-import { usageSettings, type UsageSettings } from "../shared/usage";
+import { summaryRpc, usageSettings, type UsageSettings } from "../shared/usage";
+import { demoLimits, demoMode, demoSummary } from "./demo";
 export const previewSettings = { current: usageSettings.schema.parse({}) };
 export function useSettings() {
   const [values, setValues] = useState(previewSettings.current);
@@ -25,6 +26,7 @@ export function useSettings() {
 }
 export function useRpc() {
   return useCallback(async (input: unknown) => {
+    if (demoMode) return demoSummary(summaryRpc.input.parse(input), previewSettings.current);
     const response = await fetch("/api/summary", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -36,6 +38,9 @@ export function useRpc() {
 }
 export function usePaseo() {
   return {
-    providers: { listUsage: async () => ({ fetchedAt: new Date().toISOString(), providers: [] }) },
+    providers: {
+      listUsage: async () =>
+        demoMode ? demoLimits : { fetchedAt: new Date().toISOString(), providers: [] },
+    },
   };
 }

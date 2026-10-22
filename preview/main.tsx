@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { UsageScreen } from "../client/screen";
+import { demoMode } from "./demo";
 const colors = {
   surface0: "#111113",
   surface1: "#1b1b1e",
@@ -18,7 +19,7 @@ const queryClient = new QueryClient();
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
     <UsageScreen
-      host={{ id: "preview", label: "This computer" }}
+      host={{ id: "preview", label: demoMode ? "Demo host" : "This computer" }}
       theme={{ colors }}
       layout={{ compact: false, platform: "web" }}
     />
