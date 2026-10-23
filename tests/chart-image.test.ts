@@ -1,6 +1,32 @@
+import { execFileSync } from "node:child_process";
 import { expect, test } from "vite-plus/test";
-import { decode } from "fast-png";
+import { decode, encode } from "fast-png";
 import { chartScale, pngDataUri, renderChartPng, smooth } from "../client/chart-image";
+
+test("charts load and render when the native decoder only supports UTF-8", () => {
+  // Use a fresh process so cached dependencies cannot hide import-time failures.
+  const moduleUrl = new URL("../client/chart-image.ts", import.meta.url).href;
+  const output = execFileSync(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    `
+      globalThis.TextDecoder = class extends TextDecoder {
+        constructor(encoding = "utf-8") {
+          if (!["utf-8", "utf8"].includes(encoding))
+            throw new RangeError("Unknown encoding: " + encoding);
+          super(encoding);
+        }
+      };
+      const { renderChartPng } = await import(${JSON.stringify(moduleUrl)});
+      const bytes = renderChartPng(20, 10, [{ values: [1, 2], color: [255, 0, 0] }], 2);
+      process.stdout.write(Buffer.from(bytes).toString("base64"));
+    `,
+  ]);
+  const image = decode(Buffer.from(output.toString(), "base64"));
+  expect(image.width).toBe(40);
+  expect(image.height).toBe(20);
+  expect(Buffer.from(output.toString(), "base64")).toEqual(Buffer.from(encode(image)));
+});
 
 test("the translucent fill has uniform opacity with no vertical strip seams", () => {
   const image = decode(

@@ -1,4 +1,4 @@
-import { encode } from "fast-png";
+import { zlibSync } from "fflate";
 
 export type ChartSeries = { values: number[]; color: readonly [number, number, number] };
 
@@ -55,6 +55,45 @@ export function chartScale(series: readonly ChartSeries[]) {
   return { max, ticks: Array.from({ length: Math.round(max / step) + 1 }, (_, i) => i * step) };
 }
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
+
+// Chart images need only 8-bit RGBA pixels. Write those PNG chunks directly so
+// importing the chart never requires text codecs such as TextDecoder("latin1").
+function encodeChartPng(width: number, height: number, pixels: Uint8Array) {
+  const stride = width * 4;
+  const scanlines = new Uint8Array((stride + 1) * height);
+  for (let y = 0; y < height; y++) {
+    // Each row starts with filter type 0 (unfiltered).
+    scanlines.set(pixels.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
+  }
+  const compressed = zlibSync(scanlines, { level: 3 });
+  const header = new Uint8Array(13);
+  const headerView = new DataView(header.buffer);
+  headerView.setUint32(0, width);
+  headerView.setUint32(4, height);
+  header[8] = 8; // Bit depth.
+  header[9] = 6; // Truecolor with alpha; no interlacing or metadata.
+
+  const png = new Uint8Array(8 + 12 + header.length + 12 + compressed.length + 12);
+  png.set([137, 80, 78, 71, 13, 10, 26, 10]);
+  const view = new DataView(png.buffer);
+  let offset = 8;
+  const chunk = (type: string, data: Uint8Array) => {
+    view.setUint32(offset, data.length);
+    for (let i = 0; i < 4; i++) png[offset + 4 + i] = type.charCodeAt(i);
+    png.set(data, offset + 8);
+    let crc = 0xffffffff;
+    for (let i = offset + 4; i < offset + 8 + data.length; i++) {
+      crc ^= png[i];
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+    view.setUint32(offset + 8 + data.length, (crc ^ 0xffffffff) >>> 0);
+    offset += 12 + data.length;
+  };
+  chunk("IHDR", header);
+  chunk("IDAT", compressed);
+  chunk("IEND", new Uint8Array());
+  return png;
+}
 
 export function renderChartPng(
   cssWidth: number,
@@ -122,7 +161,7 @@ export function renderChartPng(
     for (let pixel = 0; pixel < mask.length; pixel++)
       if (mask[pixel]) blend(pixel, layer.color, mask[pixel] / 255);
   }
-  return encode({ width, height, data, channels: 4, depth: 8 });
+  return encodeChartPng(width, height, data);
 }
 export function pngDataUri(bytes: Uint8Array) {
   // No Buffer, DOM, canvas, or native graphics dependency in the client bundle.
