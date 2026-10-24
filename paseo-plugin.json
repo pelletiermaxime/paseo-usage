@@ -3,6 +3,6 @@
   "name": "Usage",
   "description": "Costs, tokens, model breakdowns, and subscription limits inspired by T3 Code.",
   "media": ["assets/usage-cost.png"],
-  "requirements": { "paseo": "0.12.0" },
+  "requirements": { "paseo": ">=0.12.0" },
   "build": [["vp", "install", "--prod", "--frozen-lockfile", "--ignore-scripts"]]
 }
