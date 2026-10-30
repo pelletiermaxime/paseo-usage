@@ -14,7 +14,7 @@ Requires **Paseo 0.12.0** and [VitePlus](https://viteplus.dev), with `vp` availa
 paseo plugin install https://github.com/pelletiermaxime/paseo-usage --id usage
 ```
 
-Open **Usage** from the sidebar or choose **Open Usage** in the command menu.
+Open **Usage** from the sidebar or choose **Open Usage** in the command menu. On Paseo Max clients with footer icon support, Usage appears as a compact icon in the bottom icon row. Other clients, including mobile and official Paseo builds without that API, keep the existing Usage sidebar row.
 
 ## Using Usage
 
