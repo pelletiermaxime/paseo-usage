@@ -144,7 +144,7 @@ export function summarize(
     );
   if (totals.unpriced)
     warnings.push(
-      `${totals.unpriced.toLocaleString()} records have no known model price and are excluded from the API estimate. Set their prices under Model prices.`,
+      `${totals.unpriced.toLocaleString()} records have no known model price. Their tokens are included, but their costs are excluded from the API estimate. Set their prices under Model prices.`,
     );
   return {
     fetchedAt: now.toISOString(),

@@ -71,6 +71,7 @@ export const CodexScanState = z.object({
   sawThreadSettings: z.boolean(),
   suppressingForkCopies: z.boolean(),
   forkCopyAnchorMs: z.number(),
+  guardianStartedAtMs: z.number().nullable(),
 });
 export type CodexScanState = z.infer<typeof CodexScanState>;
 
@@ -88,6 +89,7 @@ export function initialCodexScanState(): CodexScanState {
     sawThreadSettings: false,
     suppressingForkCopies: false,
     forkCopyAnchorMs: 0,
+    guardianStartedAtMs: null,
   };
 }
 
@@ -139,6 +141,16 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): UsageRecord |
     // reassign every subsequent record to an ancestor session.
     if (state.sawSessionMeta) return null;
     state.sawSessionMeta = true;
+    const source = payloadRecord["source"];
+    if (typeof source === "object" && source !== null) {
+      const subagent = (source as Record<string, unknown>)["subagent"];
+      if (
+        typeof subagent === "object" &&
+        subagent !== null &&
+        (subagent as Record<string, unknown>)["other"] === "guardian"
+      )
+        state.guardianStartedAtMs = parseTimestampMs(record["timestamp"]);
+    }
     const id = payloadRecord["id"] ?? payloadRecord["session_id"];
     if (typeof id === "string") state.sessionId = id;
     if (typeof payloadRecord["model_provider"] === "string") {
@@ -212,13 +224,8 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): UsageRecord |
     return null;
   }
 
-  // fill_to_context_window uses zero components and synthetic totals, then offsets future totals.
-  if (
-    cumulative !== null &&
-    last.input_tokens + last.output_tokens === 0 &&
-    cumulative.input_tokens + cumulative.output_tokens === 0 &&
-    cumulative.total_tokens === infoRecord["model_context_window"]
-  ) {
+  // Context-fill and post-compaction markers report context size without processing a request.
+  if (last.input_tokens + last.output_tokens === 0) {
     state.lastUsageSignature = null;
     return null;
   }
@@ -238,9 +245,33 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): UsageRecord |
 
   const signature = JSON.stringify(last);
   if (cumulative !== null) {
+    const inherited =
+      previous === null
+        ? readCodexTokenUsage(
+            Object.fromEntries(CODEX_USAGE_FIELDS.map((key) => [key, cumulative[key] - last[key]])),
+          )
+        : null;
+    // Restarted guardians can open with an inherited snapshot of the previous guardian's
+    // counters. It establishes the baseline; it is neither a new request nor corrupt history.
     if (
-      !CODEX_USAGE_FIELDS.every((key) => cumulative[key] - (previous?.[key] ?? 0) === last[key])
+      state.guardianStartedAtMs !== null &&
+      timestampMs >= state.guardianStartedAtMs &&
+      timestampMs - state.guardianStartedAtMs < FORK_COPY_MAX_GAP_MS &&
+      previous === null &&
+      inherited !== null &&
+      CODEX_USAGE_FIELDS.some((key) => cumulative[key] > last[key])
     ) {
+      state.lastUsageSignature = signature;
+      return null;
+    }
+    // Codex resets cumulative counters when a session resumes in a new process.
+    const restarted = CODEX_USAGE_FIELDS.every((key) => cumulative[key] === last[key]);
+    // Continuations can omit their initial baseline. Validate the unseen prefix without billing it.
+    const reconciled =
+      previous === null
+        ? inherited !== null
+        : CODEX_USAGE_FIELDS.every((key) => cumulative[key] - previous[key] === last[key]);
+    if (!restarted && !reconciled) {
       state.malformedRecords += 1;
       return null;
     }

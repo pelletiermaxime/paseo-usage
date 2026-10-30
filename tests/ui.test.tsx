@@ -150,7 +150,7 @@ async function settle() {
   });
 }
 
-test("unpriced history and partial-source warnings stay visible in totals, periods and models", async () => {
+test("warning banners stay hidden while unpriced labels remain in totals, periods and models", async () => {
   const unknown = { ...record, model: "unknown" };
   await render(false, [unknown]);
   const warning = "One provider history could not be read.";
@@ -163,8 +163,8 @@ test("unpriced history and partial-source warnings stay visible in totals, perio
     ),
   );
   await act(async () => button("Refresh usage").props.onPress());
-  expect(screenText()).toContain(warning);
-  expect(screenText().some((text) => text.includes("no known model price"))).toBe(true);
+  expect(screenText()).not.toContain(warning);
+  expect(screenText().some((text) => text.includes("no known model price"))).toBe(false);
   expect(screenText().filter((text) => text === "Unpriced")).toHaveLength(3);
   expect(
     renderer!.root.findAll(

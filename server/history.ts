@@ -125,7 +125,8 @@ export class HistoryReader {
                 !entry.isFile() ||
                 ("fileName" in group
                   ? entry.name !== group.fileName
-                  : !entry.name.endsWith(".jsonl"))
+                  : !entry.name.endsWith(".jsonl") &&
+                    !(group.provider === "codex" && entry.name.endsWith(".jsonl.zst")))
               )
                 continue;
               let canonicalFile: string | null = null;

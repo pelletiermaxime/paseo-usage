@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { zstdCompressSync } from "node:zlib";
 import { readTranscript } from "../server/transcript";
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -110,4 +111,31 @@ test("Claude append scans preserve unterminated usage and agree with a cold scan
   const next = await readTranscript(file, "claude", first);
   expect(records(next)).toHaveLength(2);
   expect(records(next)).toEqual(records(await readTranscript(file, "claude")));
+});
+
+test("compressed Codex history matches plain JSONL, including concatenated frames and replaced files", async () => {
+  const content = [meta, context, event(1)].join("\n") + "\n";
+  const plain = await fixture(content);
+  const compressed = plain + ".zst";
+  await writeFile(compressed, zstdCompressSync(Buffer.from(content)));
+  const first = await readTranscript(compressed, "codex");
+  expect(records(first)).toEqual(records(await readTranscript(plain, "codex")));
+  expect(first.malformed).toBe(0);
+  await appendFile(compressed, zstdCompressSync(Buffer.from(event(2))));
+  const next = await readTranscript(compressed, "codex", first);
+  expect(records(next)).toHaveLength(2);
+  expect(next.tailRecords).toHaveLength(1);
+  expect(vi.mocked(createReadStream).mock.lastCall?.[1]).toMatchObject({ start: 0 });
+  expect(records(next)).toEqual(records(await readTranscript(compressed, "codex")));
+  await writeFile(compressed, zstdCompressSync(Buffer.from(content.replace('"session"', '"new"'))));
+  const replacement = await readTranscript(compressed, "codex", next);
+  expect(records(replacement)).toHaveLength(1);
+  expect(records(replacement)[0].sessionId).toBe("new");
+});
+
+test("truncated compressed history fails without returning incomplete totals", async () => {
+  const file = (await fixture("")) + ".zst";
+  const data = zstdCompressSync(Buffer.from([meta, context, event(1)].join("\n") + "\n"));
+  await writeFile(file, data.subarray(0, data.length - 5));
+  await expect(readTranscript(file, "codex")).rejects.toThrow();
 });

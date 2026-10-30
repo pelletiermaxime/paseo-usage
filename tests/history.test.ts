@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vite-plus/test";
 import { mkdtemp, mkdir, rm, writeFile, appendFile, copyFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { zstdCompressSync } from "node:zlib";
 import { initialCodexScanState, parseCodexLine } from "../server/codex";
 import { parseClaudeLine } from "../server/claude";
 import { HistoryReader } from "../server/history";
@@ -95,12 +96,99 @@ test("fork copies establish a baseline but do not count as new billed history", 
 test("invalid counter deltas and synthetic Claude messages are excluded", () => {
   const state = initialCodexScanState();
   parseCodexLine(json(context), state);
-  expect(parseCodexLine(json(event(usage(100, 10), usage(300, 10))), state)).toBeNull();
+  expect(parseCodexLine(json(event(usage(100, 10), usage(300, 0))), state)).toBeNull();
   expect(state.malformedRecords).toBe(1);
   expect(
     parseClaudeLine(json({ ...claude, message: { ...claude.message, model: "<synthetic>" } })),
   ).toBeNull();
   expect(parseClaudeLine(json(claude))?.totals.cacheCreationTokens).toBe(30);
+});
+test("restarted guardians use inherited counters as a baseline without an invalid-record warning", () => {
+  const state = initialCodexScanState();
+  parseCodexLine(
+    json({
+      ...meta("guardian"),
+      payload: { id: "guardian", source: { subagent: { other: "guardian" } } },
+    }),
+    state,
+  );
+  parseCodexLine(json(context), state);
+  expect(parseCodexLine(json(event(usage(100, 10), usage(300, 30))), state)).toBeNull();
+  // Repeated snapshots and inherited parent usage must not inflate totals.
+  expect(parseCodexLine(json(event(usage(100, 10), usage(300, 30))), state)).toBeNull();
+  expect(parseCodexLine(json(event(usage(100, 10), usage(400, 40))), state)?.totals).toMatchObject({
+    uncachedInputTokens: 80,
+    cachedInputTokens: 20,
+    outputTokens: 10,
+  });
+  expect(state.malformedRecords).toBe(0);
+  // Once established, the baseline still validates subsequent request deltas.
+  expect(parseCodexLine(json(event(usage(100, 10), usage(700, 50))), state)).toBeNull();
+  expect(state.malformedRecords).toBe(1);
+});
+
+test("new guardians count their first request and reject inconsistent initial snapshots", () => {
+  const guardian = () => {
+    const state = initialCodexScanState();
+    parseCodexLine(
+      json({
+        ...meta("guardian"),
+        payload: { id: "guardian", source: { subagent: { other: "guardian" } } },
+      }),
+      state,
+    );
+    parseCodexLine(json(context), state);
+    return state;
+  };
+  const state = guardian();
+  expect(parseCodexLine(json(event()), state)?.totals.outputTokens).toBe(10);
+  expect(state.malformedRecords).toBe(0);
+  const inconsistent = guardian();
+  expect(parseCodexLine(json(event(usage(100, 10), usage(300, 0))), inconsistent)).toBeNull();
+  expect(inconsistent.malformedRecords).toBe(1);
+  const impossibleCache = guardian();
+  expect(
+    parseCodexLine(
+      json(event(usage(100, 10), { ...usage(110, 20), cached_input_tokens: 100 })),
+      impossibleCache,
+    ),
+  ).toBeNull();
+  expect(impossibleCache.malformedRecords).toBe(1);
+  const continuation = guardian();
+  const later = new Date(Date.parse(stamp) + 5000).toISOString();
+  expect(
+    parseCodexLine(json(event(usage(100, 10), usage(300, 30), later)), continuation)?.totals
+      .outputTokens,
+  ).toBe(10);
+  expect(continuation.malformedRecords).toBe(0);
+});
+
+test("Codex process restarts and continuation snapshots count only the latest request", () => {
+  const state = initialCodexScanState();
+  parseCodexLine(json(context), state);
+  expect(
+    parseCodexLine(json(event(usage(100, 10), usage(300, 30))), state)?.totals.outputTokens,
+  ).toBe(10);
+  expect(parseCodexLine(json(event(usage(100, 10), usage(300, 30))), state)).toBeNull();
+  expect(
+    parseCodexLine(json(event(usage(100, 10), usage(400, 40))), state)?.totals.outputTokens,
+  ).toBe(10);
+  expect(parseCodexLine(json(event()), state)?.totals.outputTokens).toBe(10);
+  expect(
+    parseCodexLine(json(event(usage(100, 10), usage(200, 20))), state)?.totals.outputTokens,
+  ).toBe(10);
+  expect(state.malformedRecords).toBe(0);
+});
+
+test("Codex context-size markers establish a baseline without becoming billed output or malformed usage", () => {
+  const state = initialCodexScanState();
+  parseCodexLine(json(context), state);
+  parseCodexLine(json(event()), state);
+  expect(
+    parseCodexLine(json(event({ ...usage(0, 0), total_tokens: 25000 }, usage(0, 0))), state),
+  ).toBeNull();
+  expect(parseCodexLine(json(event()), state)?.totals.outputTokens).toBe(10);
+  expect(state.malformedRecords).toBe(0);
 });
 test("real JSONL scan deduplicates archive copies and Claude blocks; changed files invalidate the cache", async () => {
   const root = await mkdtemp(join(tmpdir(), "paseo-usage-"));
@@ -186,4 +274,40 @@ test("only present CLI logs contribute; the in-memory cache cannot invent histor
   await rm(file);
   expect((await reader.read(settings)).records).toHaveLength(0);
   expect((await new HistoryReader().read(settings)).records).toHaveLength(0);
+});
+
+test("Codex compression preserves totals, deduplicates archive copies, and caches unchanged compressed files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "paseo-usage-compressed-"));
+  roots.push(root);
+  vi.stubEnv("CODEX_HOME", join(root, "codex"));
+  vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, "claude"));
+  const sessions = join(root, "codex", "sessions");
+  const archives = join(root, "codex", "archived_sessions");
+  await mkdir(sessions, { recursive: true });
+  await mkdir(archives);
+  const file = join(sessions, "rollout.jsonl");
+  const content =
+    [meta("compressed-session"), context, event(), event(usage(100, 10), usage(200, 20))]
+      .map(json)
+      .join("\n") + "\n";
+  await writeFile(file, content);
+  const reader = new HistoryReader(),
+    settings = usageSettings.schema.parse({});
+  const first = await reader.read(settings);
+  await writeFile(file + ".zst", zstdCompressSync(Buffer.from(content)));
+  await writeFile(join(sessions, "auth.json.zst"), "must-not-read");
+  expect((await reader.read(settings)).records).toEqual(first.records);
+  await rm(file);
+  await copyFile(file + ".zst", join(archives, "copy.jsonl.zst"));
+  const compressed = await reader.read(settings);
+  expect(compressed.records).toEqual(first.records);
+  expect(compressed.sources[0]).toMatchObject({ files: 2, records: 2, status: "ready" });
+  expect((await reader.read(settings, true)).records).toEqual(first.records);
+  expect((await new HistoryReader().read(settings)).records).toEqual(first.records);
+  // If a compressed file is damaged during an update, retain its last complete scan.
+  await rm(join(archives, "copy.jsonl.zst"));
+  await writeFile(file + ".zst", "broken");
+  const damaged = await reader.read(settings);
+  expect(damaged.records).toEqual(first.records);
+  expect(damaged.sources[0].status).toBe("partial");
 });

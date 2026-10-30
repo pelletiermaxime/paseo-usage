@@ -2,6 +2,8 @@
 
 The Usage layout and adapted Codex, Claude, and pricing parsers are based on [T3 Code](https://github.com/pingdotgg/t3code), revision e64766c56ac6fc1678e6107052feb0047a35337f.
 
+Codex counter-reset, continuation-baseline, and context-size marker handling is updated from `apps/server/src/provider/Drivers/codexUsage.ts` at revision **aa11ef6783da81039e6646e2e96941748afb358e**.
+
 Additional Grok, Pi, OpenCode, Antigravity, and Cursor history readers are adapted from revision **8a9d0e0dd553c5b0bd943ddfd9741d6bab0e486f**:
 
 - `packages/provider-grok/src/server/usage.ts` and its synthetic tests → `server/grok.ts`, `tests/grok.test.ts`.

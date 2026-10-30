@@ -334,15 +334,6 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
               )}
               {summary && (
                 <View style={{ gap: 28, opacity: refreshing ? 0.5 : 1 }}>
-                  {summary.warnings.length > 0 && (
-                    <View style={{ gap: 6 }}>
-                      {summary.warnings.map((warning, index) => (
-                        <Label key={index} style={{ color: c.statusWarning }}>
-                          {warning}
-                        </Label>
-                      ))}
-                    </View>
-                  )}
                   <Overview
                     summary={summary}
                     metric={metric}
