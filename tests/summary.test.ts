@@ -63,6 +63,25 @@ test("calendar filtering uses the client timezone, and Past 24h is a rolling win
   expect(result.totals.tokens).toBe(380);
   expect(result.buckets[0].key).toBe("2026-10-20T02:00:00.000Z");
 });
+
+test.each([
+  {
+    timeZone: "Pacific/Kiritimati",
+    boundary: "2026-10-13T10:00:00Z",
+    currentTime: "2026-10-20T05:00:00Z",
+  },
+  { timeZone: "Etc/GMT+12", boundary: "2026-10-14T12:00:00Z", currentTime: "2026-10-20T20:00:00Z" },
+])(
+  "calendar prefilter preserves the first day at extreme offsets: $timeZone",
+  ({ timeZone, boundary, currentTime }) => {
+    const current = new Date(currentTime);
+    const start = Date.parse(boundary);
+    const rows = [record({ timestampMs: start - 1 }), record({ timestampMs: start })];
+    const result = summarize(rows, [], settings, { ...input, timeZone }, current);
+    expect(result.totals.tokens).toBe(380);
+    expect(result.buckets[0].key).toBe("2026-10-14");
+  },
+);
 test("provider filters, unknown pricing, model mappings, and zero overrides preserve attribution", () => {
   const rows = [record(), record({ provider: "claude" }), record({ model: "unknown" })];
   const hidden = summarize(rows, [], settings, { ...input, hiddenProviders: ["claude"] }, now);
@@ -149,4 +168,53 @@ test("without downloaded prices token usage stays visible and automatic costs ar
   );
   expect(reported.totals.unpriced).toBe(0);
   expect(reported.totals.cost).toBe(7);
+});
+
+test.each(["standard", "fast", "ultrafast"] as const)(
+  "Codex auto-review has zero cost and keeps its tokens without a catalog price at %s speed",
+  (speed) => {
+    const result = summarize(
+      [record({ model: "codex-auto-review", speed })],
+      [],
+      usageSettings.schema.parse({}),
+      input,
+      now,
+    );
+    expect(result.totals).toMatchObject({
+      tokens: 380,
+      cost: 0,
+      savings: 0,
+      premium: 0,
+      unpriced: 0,
+    });
+    expect(result.models[0].price).toEqual({
+      inputCostPerMillionTokens: 0,
+      outputCostPerMillionTokens: 0,
+      cacheReadCostPerMillionTokens: 0,
+      cacheWriteCostPerMillionTokens: 0,
+    });
+    expect(result.warnings).toEqual([]);
+  },
+);
+
+test("free auto-review stays separate from genuinely unknown model prices and paid usage", () => {
+  const paid = record();
+  const free = record({ model: "codex-auto-review" });
+  const unknown = record({ model: "unknown" });
+  const catalog = parseRateTable({
+    "codex-auto-review": { input_cost_per_token: 1, output_cost_per_token: 1 },
+  });
+  const result = summarize([paid, free, unknown], [], settings, input, now, catalog);
+  expect(result.totals.tokens).toBe(1140);
+  expect(result.totals.cost).toBe(summarize([paid], [], settings, input, now, catalog).totals.cost);
+  expect(result.totals.unpriced).toBe(1);
+  expect(result.models.find((m) => m.model === "codex-auto-review")).toMatchObject({
+    cost: 0,
+    unpriced: 0,
+  });
+  expect(result.models.find((m) => m.model === "unknown")).toMatchObject({
+    cost: 0,
+    unpriced: 1,
+    price: null,
+  });
 });

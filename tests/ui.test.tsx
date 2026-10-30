@@ -8,7 +8,12 @@ import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import type { UsageRecord } from "../server/types";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-const mock = vi.hoisted(() => ({ rpc: vi.fn(), save: vi.fn(), limits: vi.fn() }));
+const mock = vi.hoisted(() => ({
+  rpc: vi.fn(),
+  save: vi.fn(),
+  limits: vi.fn(),
+  initialSettings: {} as Partial<UsageSettings>,
+}));
 vi.mock("react-native", () => ({
   View: "View",
   Image: "Image",
@@ -22,7 +27,7 @@ vi.mock("react-native", () => ({
 }));
 vi.mock("@getpaseo/plugin/client", () => ({
   useSettings: () => {
-    const [values, setValues] = useState(usageSettings.schema.parse({}));
+    const [values, setValues] = useState(usageSettings.schema.parse(mock.initialSettings));
     return {
       status: "ready",
       values,
@@ -90,6 +95,7 @@ afterEach(async () => {
   mock.rpc.mockReset();
   mock.save.mockReset();
   mock.limits.mockReset();
+  mock.initialSettings = {};
   vi.useRealTimers();
 });
 async function render(compact = false, records = [record]) {
@@ -153,6 +159,8 @@ async function settle() {
 test("warning banners stay hidden while unpriced labels remain in totals, periods and models", async () => {
   const unknown = { ...record, model: "unknown" };
   await render(false, [unknown]);
+  await act(async () => button("7 days").props.onPress());
+  await settle();
   const warning = "One provider history could not be read.";
   mock.rpc.mockResolvedValueOnce(
     summarize(
@@ -180,21 +188,22 @@ test("warning banners stay hidden while unpriced labels remain in totals, period
   expect(screenText().filter((text) => text === "Unpriced")).toHaveLength(5);
 });
 
-test("partially priced totals and chart values identify the incomplete estimate", async () => {
+test("mixed priced and unknown usage shows amounts without partial suffixes and keeps unknown model costs unpriced", async () => {
   await render(false, [record, { ...record, model: "unknown" }]);
-  expect(screenText().filter((text) => text.endsWith(" · partial"))).toHaveLength(2);
+  await act(async () => button("7 days").props.onPress());
+  await settle();
+  expect(screenText().some((text) => text.includes(" · partial"))).toBe(false);
+  expect(screenText()).toContain("Unpriced");
   const columns = renderer!.root.findAll(
     (node) =>
       node.type === ("Pressable" as unknown) &&
-      node.props.accessibilityLabel?.endsWith(" · partial"),
+      node.props.accessibilityLabel?.endsWith(": $0.0002"),
   );
   expect(columns).toHaveLength(1);
   await act(async () => columns[0].props.onHoverIn());
-  expect(
-    screenText().some((text) => text.startsWith("Codex $") && text.endsWith(" · partial")),
-  ).toBe(true);
+  expect(screenText().some((text) => text === "Codex $0.0002")).toBe(true);
   await act(async () => button("Day").props.onPress());
-  expect(screenText().filter((text) => text.endsWith(" · partial")).length).toBeGreaterThan(2);
+  expect(screenText().some((text) => text.includes(" · partial"))).toBe(false);
 });
 
 test("limits keep duplicate account cards distinct and allow filtering limits-only providers", async () => {
@@ -304,6 +313,56 @@ test("the right edge shows the last successful refresh time while retaining hour
   expect(rightEdges).toHaveLength(2);
   await act(async () => rightEdges[1].props.onHoverIn());
   expect(hoveredText().filter((text) => text === "15h47 · 150")).toHaveLength(2);
+});
+
+test("visits start with 24 hours even when a wider period was saved, and keep explicit selections", async () => {
+  mock.initialSettings = { days: 30 };
+  await render();
+  expect(mock.rpc.mock.calls[0][0].days).toBe(1);
+  expect(button("Past 24h").props.accessibilityState.selected).toBe(true);
+  await act(async () => button("30 days").props.onPress());
+  await settle();
+  expect(mock.rpc.mock.lastCall?.[0].days).toBe(30);
+  await act(async () => button("Tokens").props.onPress());
+  expect(button("30 days").props.accessibilityState.selected).toBe(true);
+});
+
+test("background loading statuses preserve the current period and clear after a completed response", async () => {
+  await render();
+  const summary = summarize([record], [], usageSettings.schema.parse({}), {
+    days: 1,
+    timeZone: "UTC",
+    hiddenProviders: [],
+  });
+  mock.rpc.mockResolvedValueOnce({ ...summary, historyLoading: true, pricingRefreshing: true });
+  await act(async () => button("Refresh usage").props.onPress());
+  expect(screenText().some((text) => text.includes("Loading older history…"))).toBe(true);
+  expect(screenText().some((text) => text.includes("Updating prices…"))).toBe(true);
+  expect(button("Past 24h").props.accessibilityState.selected).toBe(true);
+  mock.rpc.mockResolvedValueOnce({ ...summary, historyLoading: false, pricingRefreshing: false });
+  await act(async () => button("Refresh usage").props.onPress());
+  expect(screenText().some((text) => text.includes("Loading older history…"))).toBe(false);
+  expect(screenText().some((text) => text.includes("Updating prices…"))).toBe(false);
+});
+
+test("an open model detail receives updated usage when background results arrive", async () => {
+  await render();
+  await act(async () => button("Usage for model").props.onPress());
+  const updated = summarize(
+    [{ ...record, totals: { ...record.totals, outputTokens: 180 } }],
+    [],
+    usageSettings.schema.parse({}),
+    {
+      days: 1,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      hiddenProviders: [],
+    },
+  );
+  await act(async () => {
+    queryClient!.setQueriesData({ queryKey: ["usage-summary"] }, updated);
+  });
+  await settle();
+  expect(screenText().filter((text) => text === "300").length).toBeGreaterThanOrEqual(3);
 });
 test("the rendered screen switches metric and periods, opens a model, and reads limits through Paseo", async () => {
   await render();

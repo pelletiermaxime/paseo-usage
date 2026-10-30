@@ -18,14 +18,14 @@ Open **Usage** from the sidebar or choose **Open Usage** in the command menu. On
 
 ## Using Usage
 
-Choose **Cost**, **Tokens** or **Limits**. For usage history, select the past 24 hours or 7, 30 or 90 days. Filter by provider, follow activity on the chart, or click a model for its detailed breakdown.
+Choose **Cost**, **Tokens** or **Limits**. Usage opens on the past 24 hours while older history loads in the background. Select 7, 30 or 90 days for a wider view. Filter by provider, follow activity on the chart, or click a model for its detailed breakdown.
 
 Click the host name in the top bar to configure:
 
 - **History sources**: add provider directories or Cursor CLI login files when your accounts use custom locations.
 - **Model prices**: set USD prices per million tokens or map a model name to a known model.
 
-Costs are API-equivalent estimates; your subscription bill may differ. Model prices come from LiteLLM and are cached for 12 hours. Unknown prices appear as **Unpriced**, and incomplete estimates are marked **partial**.
+Costs are API-equivalent estimates; your subscription bill may differ. Model prices come from LiteLLM and refresh in the background after 12 hours, using the last available prices while updating. Unknown model costs appear as **Unpriced**. Codex auto-review is assigned zero cost, with its tokens still included.
 
 The Limits view shows available quotas and reset times for accounts connected to Paseo. Paseo may cache these readings for up to five minutes, so checking again can return the same values.
 

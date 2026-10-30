@@ -20,11 +20,11 @@ function defaultCacheFile() {
           : join(homedir(), ".cache");
   return join(root, "paseo-usage", "model-prices.json");
 }
-function downloadPriceDocument(): Promise<unknown> {
+function downloadPriceDocument(signal?: AbortSignal): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const request = get(
       "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
-      { headers: { Accept: "application/json" } },
+      { headers: { Accept: "application/json" }, signal },
       (response) => {
         if (response.statusCode !== 200) {
           response.resume();
@@ -63,13 +63,16 @@ export class PriceCatalog {
   private pending: Promise<void> | null = null;
   private lastAttemptAtMs = -Infinity;
   private failed = false;
+  private controller = new AbortController();
   constructor(
-    private download: () => Promise<unknown> = downloadPriceDocument,
+    private download: (signal?: AbortSignal) => Promise<unknown> = downloadPriceDocument,
     private cacheFile = defaultCacheFile(),
   ) {}
-  async get() {
+  async get(options: { awaitRefresh?: boolean } = {}) {
+    this.controller.signal.throwIfAborted();
     this.loading ??= this.loadCache();
     await this.loading;
+    this.controller.signal.throwIfAborted();
     const expired =
       this.fetchedAtMs === null || Date.now() - this.fetchedAtMs >= PRICE_CACHE_TTL_MS;
     // History refreshes do not bypass the price TTL. Failed downloads back off separately.
@@ -77,12 +80,14 @@ export class PriceCatalog {
       this.pending ??= this.refresh().finally(() => {
         this.pending = null;
       });
-      await this.pending;
     }
+    // Serve the last good table immediately; requests must not wait on a price download.
+    if (options.awaitRefresh) await this.pending;
     return {
       rates: this.rates,
       updatedAt: this.fetchedAtMs === null ? undefined : new Date(this.fetchedAtMs).toISOString(),
       failed: this.failed,
+      refreshing: this.pending !== null,
     };
   }
   private async loadCache() {
@@ -107,7 +112,8 @@ export class PriceCatalog {
   private async refresh(): Promise<void> {
     this.lastAttemptAtMs = Date.now();
     try {
-      const document = await this.download();
+      const document = await this.download(this.controller.signal);
+      this.controller.signal.throwIfAborted();
       const table = parseRateTable(document);
       if (!table.size) throw new Error("Empty price catalog");
       this.rates = table;
@@ -129,5 +135,9 @@ export class PriceCatalog {
     } catch {
       this.failed = true;
     }
+  }
+
+  dispose() {
+    this.controller.abort();
   }
 }

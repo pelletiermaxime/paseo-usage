@@ -1,7 +1,12 @@
 import { readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { readTranscript, transcriptSignature, type TranscriptCache } from "./transcript.ts";
+import {
+  readTranscript,
+  transcriptSignature,
+  type TranscriptCache,
+  type TranscriptReadOptions,
+} from "./transcript.ts";
 import type { UsageRecord } from "./types.ts";
 import type { UsageSettings, UsageSummary } from "../shared/usage.ts";
 import { environmentPaths, expandHome, roots, sourceState, type SourceScan } from "./source-files";
@@ -11,26 +16,30 @@ import { CursorReader } from "./cursor";
 
 type Source = UsageSummary["sources"][number];
 type Cached = TranscriptCache;
-type Scan = { records: UsageRecord[]; sources: Source[] };
+export type HistoryScan = { records: UsageRecord[]; sources: Source[]; deferredKey: string };
 export { expandHome } from "./source-files";
 export class HistoryReader {
-  private cache = new Map<string, Cached>();
-  private pending: Promise<Scan> | null = null;
+  private pending: Promise<HistoryScan> | null = null;
   private configuration = "";
   private opencode = new OpenCodeReader();
   private antigravity = new AntigravityReader();
-  constructor(private cursor = new CursorReader()) {}
+  constructor(
+    private cursor = new CursorReader(),
+    private cache = new Map<string, Cached>(),
+    private options: TranscriptReadOptions = {},
+  ) {}
 
-  async read(settings: UsageSettings, refresh = false): Promise<Scan> {
+  async read(settings: UsageSettings, refresh = false, sinceMs?: number): Promise<HistoryScan> {
+    this.options.signal?.throwIfAborted();
     // Serialize scans even if source settings change during a refresh.
-    const configuration = JSON.stringify([settings, refresh]);
+    const configuration = JSON.stringify([settings, refresh, sinceMs]);
     if (this.pending) {
       if (configuration === this.configuration) return this.pending;
       await this.pending.catch(() => {});
-      return this.read(settings, refresh);
+      return this.read(settings, refresh, sinceMs);
     }
     this.configuration = configuration;
-    this.pending = this.scan(settings, refresh);
+    this.pending = this.scan(settings, refresh, sinceMs);
     try {
       return await this.pending;
     } finally {
@@ -38,7 +47,8 @@ export class HistoryReader {
     }
   }
 
-  private async scan(settings: UsageSettings, refresh: boolean) {
+  private async scan(settings: UsageSettings, refresh: boolean, sinceMs?: number) {
+    this.options.signal?.throwIfAborted();
     const groups = [
       {
         provider: "codex",
@@ -74,6 +84,7 @@ export class HistoryReader {
     const seen = new Set<string>();
     const visited = new Set<string>();
     const activeFiles = new Set<string>();
+    const deferred: string[] = [];
     for (const group of groups) {
       const source: Source = { provider: group.provider, files: 0, records: 0, status: "missing" };
       let failed = 0;
@@ -103,6 +114,7 @@ export class HistoryReader {
         for (const subdir of group.subdirs) {
           const root = join(expanded, subdir);
           const walk = async (directory: string): Promise<void> => {
+            this.options.signal?.throwIfAborted();
             let entries;
             try {
               const canonical = await realpath(directory);
@@ -131,6 +143,8 @@ export class HistoryReader {
                 continue;
               let canonicalFile: string | null = null;
               try {
+                await this.options.beforeRead?.();
+                this.options.signal?.throwIfAborted();
                 const canonical = await realpath(file);
                 canonicalFile = canonical;
                 if (activeFiles.has(canonical)) continue;
@@ -140,12 +154,31 @@ export class HistoryReader {
                 const signature = transcriptSignature(info);
                 let cached = this.cache.get(canonical);
                 if (cached?.signature !== signature || cached.provider !== group.provider) {
-                  cached = await readTranscript(canonical, group.provider, cached);
+                  // Old mtimes only prioritize work. A full background pass verifies skipped
+                  // files too, including restored files whose usage is newer than their mtime.
+                  if (sinceMs !== undefined && info.mtimeMs < sinceMs) {
+                    deferred.push(`${group.provider}:${canonical}:${signature}`);
+                    if (cached?.provider === group.provider) collect(cached);
+                    continue;
+                  }
+                  const previous = cached;
+                  const parsed = await readTranscript(
+                    canonical,
+                    group.provider,
+                    cached,
+                    this.options,
+                  );
+                  // A foreground scan may have updated this file while the background reader
+                  // was paused. Never replace that result with a slower, earlier read.
+                  const current = this.cache.get(canonical);
+                  cached =
+                    current !== previous && current?.provider === group.provider ? current : parsed;
                   this.cache.set(canonical, cached);
                 }
                 malformed += cached.malformed;
                 collect(cached);
               } catch {
+                this.options.signal?.throwIfAborted();
                 failed++;
                 const previous = this.cache.get(canonicalFile ?? file);
                 if (previous) collect(previous);
@@ -162,7 +195,7 @@ export class HistoryReader {
       sources.push(source);
     }
     for (const file of this.cache.keys()) if (!activeFiles.has(file)) this.cache.delete(file);
-    const cutoff = Date.now() - 92 * 86_400_000;
+    const cutoff = sinceMs ?? Date.now() - 92 * 86_400_000;
     const readSource = async (
       provider: string,
       paths: string[],
@@ -170,8 +203,12 @@ export class HistoryReader {
     ) => {
       let scanned: SourceScan;
       try {
+        await this.options.beforeRead?.();
+        this.options.signal?.throwIfAborted();
         scanned = await read(await roots(paths));
+        this.options.signal?.throwIfAborted();
       } catch {
+        this.options.signal?.throwIfAborted();
         scanned = {
           records: [],
           source: {
@@ -218,6 +255,6 @@ export class HistoryReader {
       (paths) => this.antigravity.read(paths, cutoff),
     );
     await readSource("cursor", [], () => this.cursor.read(settings, cutoff, refresh));
-    return { records, sources };
+    return { records, sources, deferredKey: JSON.stringify(deferred.sort()) };
   }
 }

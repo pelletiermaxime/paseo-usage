@@ -75,7 +75,9 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
   const queryClient = useQueryClient();
   const rpc = useRpc(summaryRpc);
   const values = settings.values;
-  const { metric, days } = values;
+  const { metric } = values;
+  // Each visit starts with the fast recent view, including hosts with an older saved period.
+  const [days, setDays] = useState<UsageSettings["days"]>(1);
   const [width, setWidth] = useState(layout.compact ? 380 : 1200);
   const compact = layout.compact || width < 780;
   const [filter, setFilter] = useState<"providers" | "host" | null>(null);
@@ -109,6 +111,8 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
     staleTime: 60_000,
     retry: false,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      query.state.data?.historyLoading || query.state.data?.pricingRefreshing ? 2000 : false,
   });
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
@@ -142,7 +146,10 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
     if (next !== metric) void save({ metric: next });
   };
   const selectPeriod = (next: 1 | 7 | 30 | 90) => {
-    if (next !== days) void save({ days: next });
+    if (next !== days) {
+      setDays(next);
+      void save({ days: next });
+    }
   };
   useEffect(() => {
     // Paseo also runs on native platforms, where there is no browser event target.
@@ -194,6 +201,9 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
     return () => target.removeEventListener?.("keydown", handler);
   });
   const summary = query.data;
+  const selectedModel = summary?.models.find(
+    (entry) => entry.provider === model?.provider && entry.model === model?.model,
+  );
   const keys = summary ? periodKeys(summary.since, summary.until, days === 1, timeZone) : [];
   const windowLabel = summary
     ? [
@@ -381,6 +391,8 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
                     <View style={[styles.between, { flexWrap: "wrap" }]}>
                       <Label muted style={{ fontSize: 10 }}>
                         Updated {new Date(summary.fetchedAt).toLocaleString()} · {timeZone}
+                        {summary.historyLoading ? " · Loading older history…" : ""}
+                        {summary.pricingRefreshing ? " · Updating prices…" : ""}
                       </Label>
                       <Button icon="SlidersHorizontal" onPress={() => openPrices()}>
                         Model prices
@@ -466,16 +478,16 @@ function ReadyUsage({ host, layout, settings }: PluginSurfaceProps & { settings:
           </Modal.Content>
         </Modal>
       )}
-      {model && summary && (
+      {selectedModel && summary && (
         <ModelDetail
-          model={model}
+          model={selectedModel}
           keys={keys}
           metric={metric === "limits" ? "cost" : metric}
           hourly={days === 1}
           until={summary.until}
           onClose={() => setModel(null)}
           onPrice={() => {
-            openPrices(model.model);
+            openPrices(selectedModel.model);
             setModel(null);
           }}
         />

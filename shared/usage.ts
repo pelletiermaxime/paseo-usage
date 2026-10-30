@@ -24,7 +24,7 @@ export const usageSettings = defineSettings({
   version: 1,
   schema: z.object({
     metric: z.enum(["cost", "tokens", "limits"]).default("cost"),
-    days: z.union([z.literal(1), z.literal(7), z.literal(30), z.literal(90)]).default(7),
+    days: z.union([z.literal(1), z.literal(7), z.literal(30), z.literal(90)]).default(1),
     hiddenProviders: z.array(z.string()).default([]),
     codexHomes: z.array(z.string()).default([]),
     claudeHomes: z.array(z.string()).default([]),
@@ -80,6 +80,8 @@ export const summaryRpc = defineRpc({
   output: z.object({
     fetchedAt: z.string(),
     pricingUpdatedAt: z.string().optional(),
+    historyLoading: z.boolean().optional(),
+    pricingRefreshing: z.boolean().optional(),
     since: z.string(),
     until: z.string(),
     sessions: z.number(),
@@ -100,3 +102,4 @@ export const summaryRpc = defineRpc({
   }),
 });
 export type UsageSummary = z.infer<typeof summaryRpc.output>;
+export type UsageSummaryInput = z.infer<typeof summaryRpc.input>;

@@ -26,6 +26,17 @@ export type TranscriptCache = {
 };
 
 const GUARD_BYTES = 256;
+const CODEX_MARKERS = [
+  "token_count",
+  "turn_context",
+  "session_meta",
+  "thread_settings_applied",
+].map((marker) => Buffer.from('"' + marker + '"'));
+const CLAUDE_MARKER = Buffer.from('"usage"');
+export type TranscriptReadOptions = {
+  signal?: AbortSignal;
+  beforeRead?: () => Promise<void>;
+};
 const identity = (info: Stats) => `${info.dev}:${info.ino}:${info.birthtimeMs}`;
 export const transcriptSignature = (info: Stats) =>
   `${identity(info)}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
@@ -47,7 +58,9 @@ export async function readTranscript(
   path: string,
   provider: string,
   previous?: TranscriptCache,
+  options: TranscriptReadOptions = {},
 ): Promise<TranscriptCache> {
+  options.signal?.throwIfAborted();
   const file = await open(path, "r");
   try {
     const info = await file.stat();
@@ -72,24 +85,22 @@ export async function readTranscript(
     const piState = base ? structuredClone(base.piState) : { sessionId: "" };
     let position = base?.position ?? 0;
     let exceptions = base?.exceptions ?? 0;
-    let pending: Buffer = Buffer.alloc(0);
+    const fragments: Buffer[] = [];
+    let pendingLength = 0;
     const cutoff = Date.now() - 92 * 86_400_000;
-    const parse = (line: string, scanState: CodexScanState, pi: { sessionId: string }) => {
-      if (
-        provider === "codex" &&
-        !["token_count", "turn_context", "session_meta", "thread_settings_applied"].some((marker) =>
-          line.includes('"' + marker + '"'),
-        )
-      )
+    const parse = (line: Buffer, scanState: CodexScanState, pi: { sessionId: string }) => {
+      if (provider === "codex" && !CODEX_MARKERS.some((marker) => line.includes(marker)))
         return { records: [], exceptions: 0 };
-      if (provider === "claude" && !line.includes('"usage"')) return { records: [], exceptions: 0 };
+      if (provider === "claude" && !line.includes(CLAUDE_MARKER))
+        return { records: [], exceptions: 0 };
       try {
+        const text = line.toString("utf8");
         let parsed: readonly UsageRecord[];
-        if (provider === "grok") parsed = parseGrokLine(line);
-        else if (provider === "pi") parsed = parsePiLine(line, pi);
+        if (provider === "grok") parsed = parseGrokLine(text);
+        else if (provider === "pi") parsed = parsePiLine(text, pi);
         else {
           const record =
-            provider === "codex" ? parseCodexLine(line, scanState) : parseClaudeLine(line);
+            provider === "codex" ? parseCodexLine(text, scanState) : parseClaudeLine(text);
           parsed = record ? [record] : [];
         }
         const records = parsed.filter((record) => record.timestampMs >= cutoff);
@@ -104,6 +115,7 @@ export async function readTranscript(
       const input = createReadStream(path, {
         start: position,
         end: info.size - 1,
+        signal: options.signal,
       });
       // Compressed rollouts are read from the beginning when their fingerprint changes.
       // Byte offsets in the decompressed JSONL cannot be used to seek the compressed file.
@@ -119,16 +131,28 @@ export async function readTranscript(
           stream = input.pipe(decoder);
         }
         for await (const chunk of stream) {
-          const buffer: Buffer = pending.length ? Buffer.concat([pending, chunk]) : chunk;
+          await options.beforeRead?.();
+          options.signal?.throwIfAborted();
           let start = 0;
-          for (let end = buffer.indexOf(10, start); end !== -1; end = buffer.indexOf(10, start)) {
-            const parsed = parse(buffer.subarray(start, end).toString("utf8"), state, piState);
+          for (let end = chunk.indexOf(10, start); end !== -1; end = chunk.indexOf(10, start)) {
+            const part = chunk.subarray(start, end);
+            const length = pendingLength + part.length;
+            // Join a split line once, rather than re-copying its entire prefix for every chunk.
+            if (fragments.length) fragments.push(part);
+            const line = fragments.length ? Buffer.concat(fragments, length) : part;
+            const parsed = parse(line, state, piState);
             for (const record of parsed.records) records.push(record);
             exceptions += parsed.exceptions;
-            position += end - start + 1;
+            position += length + 1;
+            fragments.length = 0;
+            pendingLength = 0;
             start = end + 1;
           }
-          pending = buffer.subarray(start);
+          if (start < chunk.length) {
+            const part = chunk.subarray(start);
+            fragments.push(part);
+            pendingLength += part.length;
+          }
         }
       } finally {
         input.destroy();
@@ -136,8 +160,8 @@ export async function readTranscript(
       }
     }
     const tailState = structuredClone(state);
-    const tail = pending.length
-      ? parse(pending.toString("utf8"), tailState, structuredClone(piState))
+    const tail = pendingLength
+      ? parse(Buffer.concat(fragments, pendingLength), tailState, structuredClone(piState))
       : { records: [], exceptions: 0 };
     const head = compressed
       ? Buffer.alloc(0)

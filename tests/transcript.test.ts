@@ -139,3 +139,27 @@ test("truncated compressed history fails without returning incomplete totals", a
   await writeFile(file, data.subarray(0, data.length - 5));
   await expect(readTranscript(file, "codex")).rejects.toThrow();
 });
+
+test("long split lines are assembled once and keep append offsets and token totals intact", async () => {
+  const hugeContext = JSON.stringify({
+    type: "turn_context",
+    payload: { model: "gpt-5", instructions: "é".repeat(1_000_000) },
+  });
+  const content = [meta, hugeContext, event(1)].join("\n") + "\n";
+  const file = await fixture(content);
+  const concat = vi.spyOn(Buffer, "concat");
+  let first: Awaited<ReturnType<typeof readTranscript>>;
+  try {
+    first = await readTranscript(file, "codex");
+    expect(concat.mock.calls.length).toBeLessThan(10);
+  } finally {
+    concat.mockRestore();
+  }
+  expect(first.position).toBe(Buffer.byteLength(content));
+  expect(records(first)).toHaveLength(1);
+  await appendFile(file, event(2) + "\n");
+  const next = await readTranscript(file, "codex", first);
+  expect(next.position).toBe(Buffer.byteLength(content + event(2) + "\n"));
+  expect(records(next)).toHaveLength(2);
+  expect(records(next)).toEqual(records(await readTranscript(file, "codex")));
+});

@@ -201,6 +201,14 @@ const UNPRICEABLE_MODELS = new Set([
  * never mutated once built.
  */
 const resolvedRates = new WeakMap<RateTable, Map<string, ModelRate | null>>();
+const CODEX_AUTO_REVIEW_RATE: ModelRate = {
+  inputCostPerToken: 0,
+  outputCostPerToken: 0,
+  cacheReadCostPerToken: 0,
+  cacheCreationCostPerToken: 0,
+  fast: null,
+  ultrafast: null,
+};
 
 export function lookupRate(table: RateTable, model: string): ModelRate | null {
   let resolved = resolvedRates.get(table);
@@ -218,6 +226,8 @@ export function lookupRate(table: RateTable, model: string): ModelRate | null {
 
 function resolveRate(table: RateTable, model: string): ModelRate | null {
   const key = stripVariantSuffix(normalizeRateKey(model));
+  // Auto-review is free; its tokens still count without a downloaded catalog entry.
+  if (key === "codex-auto-review") return CODEX_AUTO_REVIEW_RATE;
   const bareName = bareModelName(key);
   if (bareName.length === 0 || UNPRICEABLE_MODELS.has(bareName)) return null;
   return table.get(key) ?? null;

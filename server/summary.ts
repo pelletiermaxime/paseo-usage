@@ -54,6 +54,9 @@ export function summarize(
   first.setUTCDate(first.getUTCDate() - input.days + 1);
   const firstDay = first.toISOString().slice(0, 10);
   const since = input.days === 1 ? new Date(now.getTime() - 86_400_000).toISOString() : firstDay;
+  // Reject old timestamps before timezone formatting. Calendar windows use a conservative UTC
+  // bound; the day-key comparison below still handles timezone and daylight-saving boundaries.
+  const sinceMs = input.days === 1 ? Date.parse(since) : Date.parse(firstDay) - 14 * 3_600_000;
   const hidden = new Set(input.hiddenProviders);
   const overrides = createOverrideRateTable(settings.prices);
   const totals = emptyTotals();
@@ -69,9 +72,14 @@ export function summarize(
   const modelBuckets = new Map<string, Map<string, Totals & { key: string; provider: string }>>();
   let unresolvedSpeed = 0;
   for (const original of records) {
-    if (hidden.has(original.provider) || original.timestampMs > now.getTime()) continue;
-    const day = dayKey(new Date(original.timestampMs));
-    if (input.days === 1 ? original.timestampMs < Date.parse(since) : day < firstDay) continue;
+    if (
+      hidden.has(original.provider) ||
+      original.timestampMs > now.getTime() ||
+      original.timestampMs < sinceMs
+    )
+      continue;
+    const day = input.days === 1 ? "" : dayKey(new Date(original.timestampMs));
+    if (input.days !== 1 && day < firstDay) continue;
     const mapped = settings.modelMappings[original.model]?.trim();
     const record = mapped ? { ...original, model: mapped, rateModel: mapped } : original;
     const rateModel = record.rateModel ?? record.model;
